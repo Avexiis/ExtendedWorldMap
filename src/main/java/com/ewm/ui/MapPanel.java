@@ -9,6 +9,7 @@ import com.ewm.store.ImageCache;
 import com.ewm.store.MapReader;
 import com.google.gson.Gson;
 import java.awt.BasicStroke;
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Graphics;
@@ -35,6 +36,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nullable;
 import javax.swing.ImageIcon;
 import javax.swing.JDialog;
@@ -46,11 +48,13 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.ToolTipManager;
 import javax.swing.border.EmptyBorder;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 
-class MapPanel extends JPanel
+@Slf4j
+public class MapPanel extends JPanel
 {
 	private static final int GAME_REGION_SIZE = 64;
 	private static final int IMAGE_REGION_SIZE = 256;
@@ -82,6 +86,9 @@ class MapPanel extends JPanel
 		t.setDaemon(true);
 		return t;
 	});
+
+	private final AtomicBoolean loadStarted = new AtomicBoolean(false);
+	private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
 	private MapReader map;
 	private int colsFull;
@@ -129,7 +136,7 @@ class MapPanel extends JPanel
 	private Rectangle hoveredMarkerScreenBounds = null;
 	private String hoveredMarkerTooltip = null;
 
-	MapPanel(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, ConfigManager configManager, Gson gson)
+	public MapPanel(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, ConfigManager configManager, Gson gson)
 	{
 		this.client = client;
 		this.cfg = cfg;
@@ -282,6 +289,150 @@ class MapPanel extends JPanel
 		return up + t.substring(1);
 	}
 
+	boolean isShowPlayer()
+	{
+		return showPlayer;
+	}
+
+	void setShowPlayer(boolean b)
+	{
+		showPlayer = b;
+		repaint();
+	}
+
+	boolean isShowGrid()
+	{
+		return showGrid;
+	}
+
+	void setShowGrid(boolean b)
+	{
+		showGrid = b;
+		repaint();
+	}
+
+	boolean isShowGroundMarkers()
+	{
+		return showGroundMarkers;
+	}
+
+	void setShowGroundMarkers(boolean b)
+	{
+		showGroundMarkers = b;
+		hoveredMarkerScreenBounds = null;
+		hoveredMarkerTooltip = null;
+
+		if (!b)
+		{
+			groundMarkers.clear();
+		}
+		else
+		{
+			reloadGroundMarkersAsync();
+		}
+
+		repaint();
+	}
+
+	boolean isTrackPlayer()
+	{
+		return trackPlayer;
+	}
+
+	void setTrackPlayer(boolean b)
+	{
+		trackPlayer = b;
+		if (b)
+		{
+			centerOnPlayer(true);
+		}
+		repaint();
+	}
+
+	int getCurrentPlane()
+	{
+		return currentPlane;
+	}
+
+	public void loadMapIfNeeded()
+	{
+		if (shuttingDown.get())
+		{
+			return;
+		}
+		if (!loadStarted.compareAndSet(false, true))
+		{
+			return;
+		}
+		loadMap();
+	}
+
+	public void shutdown()
+	{
+		if (!shuttingDown.compareAndSet(false, true))
+		{
+			return;
+		}
+
+		try
+		{
+			repaintTimer.stop();
+		}
+		catch (Throwable ignore)
+		{
+		}
+
+		try
+		{
+			ToolTipManager.sharedInstance().unregisterComponent(this);
+		}
+		catch (Throwable ignore)
+		{
+		}
+
+		try
+		{
+			loader.shutdownNow();
+		}
+		catch (Throwable ignore)
+		{
+		}
+
+		try
+		{
+			closeMapReader();
+		}
+		catch (Throwable ignore)
+		{
+		}
+
+		synchronized (tileCache)
+		{
+			tileCache.clear();
+		}
+		inflight.clear();
+		groundMarkers.clear();
+		previewQuarter = null;
+		hereIcon = null;
+		repaint();
+	}
+
+	private void closeMapReader()
+	{
+		MapReader m = map;
+		map = null;
+		if (m != null)
+		{
+			try
+			{
+				m.close();
+			}
+			catch (Throwable ignore)
+			{
+			}
+		}
+	}
+
 	public void reloadGroundMarkersAsync()
 	{
 		loader.execute(() ->
@@ -314,46 +465,6 @@ class MapPanel extends JPanel
 		dockShiftDragEnabled = b;
 	}
 
-	void setShowPlayer(boolean b)
-	{
-		showPlayer = b;
-		repaint();
-	}
-
-	void setShowGrid(boolean b)
-	{
-		showGrid = b;
-		repaint();
-	}
-
-	void setShowGroundMarkers(boolean b)
-	{
-		showGroundMarkers = b;
-		hoveredMarkerScreenBounds = null;
-		hoveredMarkerTooltip = null;
-
-		if (!b)
-		{
-			groundMarkers.clear();
-		}
-		else
-		{
-			reloadGroundMarkersAsync();
-		}
-
-		repaint();
-	}
-
-	void setTrackPlayer(boolean b)
-	{
-		trackPlayer = b;
-		if (b)
-		{
-			centerOnPlayer(true);
-		}
-		repaint();
-	}
-
 	void setPlane(int plane)
 	{
 		int clamped = plane;
@@ -374,7 +485,7 @@ class MapPanel extends JPanel
 		repaint();
 	}
 
-	void loadMap()
+	private void loadMap()
 	{
 		final Window owner = getParentWindow();
 		final LoadingDialog dlg = LoadingDialog.show(owner, "Preparing map...");
@@ -385,12 +496,11 @@ class MapPanel extends JPanel
 		{
 			try
 			{
-				dlg.setStatusText("First time use - downloading extended map...");
-				mapFiles.ensureMapPresent(bytes ->
-				{
-					long abs = Math.abs(bytes);
-					dlg.setBytesDownloaded(abs);
-				});
+				dlg.setStatusText("Checking for map updates...");
+
+				closeMapReader();
+
+				mapFiles.ensureMapUpToDate(dlg::setBytesProgress);
 
 				dlg.setStatusText("Opening map...");
 
@@ -425,7 +535,7 @@ class MapPanel extends JPanel
 			}
 			catch (Throwable t)
 			{
-				t.printStackTrace();
+				log.error("Extended map loading failed", t);
 			}
 			finally
 			{
@@ -630,6 +740,11 @@ class MapPanel extends JPanel
 
 	private void requestTileAsync(LOD lod, int plane, int tx, int ty)
 	{
+		if (map == null)
+		{
+			return;
+		}
+
 		String key = lod.subsample + ":" + plane + ":" + tx + ":" + ty;
 		if (!inflight.add(key))
 		{
@@ -640,7 +755,13 @@ class MapPanel extends JPanel
 		{
 			try
 			{
-				BufferedImage img = map.readTileImage(lod.subsample, plane, tx, ty);
+				MapReader m = map;
+				if (m == null)
+				{
+					return;
+				}
+
+				BufferedImage img = m.readTileImage(lod.subsample, plane, tx, ty);
 				if (img != null)
 				{
 					synchronized (tileCache)
@@ -890,7 +1011,7 @@ class MapPanel extends JPanel
 		playerIconTooltip = capitalizeFirst(rawName);
 	}
 
-	void focusPlayer()
+	public void focusPlayer()
 	{
 		centerOnPlayer(true);
 		repaint();
@@ -997,6 +1118,7 @@ class MapPanel extends JPanel
 		private final JProgressBar bar;
 		private long lastBytes = 0L;
 		private long lastUpdateMs = 0L;
+		private long lastTotal = -1L;
 
 		private Window followedOwner;
 		private ComponentAdapter followListener;
@@ -1010,11 +1132,11 @@ class MapPanel extends JPanel
 			JPanel p = new JPanel();
 			p.setBorder(new EmptyBorder(10, 14, 10, 14));
 			p.setBackground(new Color(30, 30, 30));
-			p.setLayout(new java.awt.BorderLayout(8, 8));
+			p.setLayout(new BorderLayout(8, 8));
 
 			label = new JLabel(title, SwingConstants.CENTER);
 			label.setForeground(new Color(220, 220, 220));
-			p.add(label, java.awt.BorderLayout.NORTH);
+			p.add(label, BorderLayout.NORTH);
 
 			bar = new JProgressBar();
 			bar.setForeground(new Color(66, 135, 245));
@@ -1022,7 +1144,7 @@ class MapPanel extends JPanel
 			bar.setBorderPainted(false);
 			bar.setStringPainted(true);
 			bar.setString("");
-			p.add(bar, java.awt.BorderLayout.CENTER);
+			p.add(bar, BorderLayout.CENTER);
 
 			setContentPane(p);
 			pack();
@@ -1039,6 +1161,15 @@ class MapPanel extends JPanel
 			LoadingDialog d = new LoadingDialog(owner, title);
 			SwingUtilities.invokeLater(() -> d.setVisible(true));
 			return d;
+		}
+
+		private static String formatMb(long bytes)
+		{
+			if (bytes <= 0)
+			{
+				return "Unknown";
+			}
+			return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
 		}
 
 		void followOwner(Window owner)
@@ -1135,12 +1266,12 @@ class MapPanel extends JPanel
 			SwingUtilities.invokeLater(() -> label.setText(text));
 		}
 
-		void setBytesDownloaded(long bytesOrNegativeForUnknown)
+		void setBytesProgress(long downloadedBytes, long totalBytesOrNegativeForUnknown)
 		{
 			SwingUtilities.invokeLater(() ->
 			{
 				long now = System.currentTimeMillis();
-				long absBytes = Math.abs(bytesOrNegativeForUnknown);
+				long absBytes = Math.max(0L, downloadedBytes);
 
 				if (now - lastUpdateMs < 125 && absBytes - lastBytes < (512 * 1024))
 				{
@@ -1149,12 +1280,28 @@ class MapPanel extends JPanel
 
 				lastUpdateMs = now;
 				lastBytes = absBytes;
+				lastTotal = totalBytesOrNegativeForUnknown;
 
 				bar.setIndeterminate(false);
-				bar.setMinimum(0);
-				bar.setMaximum(1);
-				bar.setValue(1);
-				bar.setString(String.format("Downloaded %.1f MB / 59.6 MB", absBytes / (1024.0 * 1024.0)));
+
+				if (totalBytesOrNegativeForUnknown > 0)
+				{
+					int max = (int) Math.min(Integer.MAX_VALUE, totalBytesOrNegativeForUnknown);
+					int val = (int) Math.min(Integer.MAX_VALUE, absBytes);
+
+					bar.setMinimum(0);
+					bar.setMaximum(max);
+					bar.setValue(val);
+
+					bar.setString("Downloaded " + formatMb(absBytes) + " / " + formatMb(totalBytesOrNegativeForUnknown));
+				}
+				else
+				{
+					bar.setMinimum(0);
+					bar.setMaximum(1);
+					bar.setValue(1);
+					bar.setString("Downloaded " + formatMb(absBytes) + " / Unknown");
+				}
 			});
 		}
 

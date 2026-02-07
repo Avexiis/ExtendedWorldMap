@@ -2,10 +2,11 @@ package com.ewm;
 
 import com.ewm.store.FileManager;
 import com.ewm.ui.MapDock;
+import com.ewm.ui.MapPanel;
 import com.ewm.ui.MapWindow;
 import com.google.gson.Gson;
-import com.google.inject.Binder;
 import com.google.inject.Provides;
+import java.awt.Container;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.SwingUtilities;
@@ -40,11 +41,11 @@ public class ExtendedWorldMapPlugin extends Plugin
 	private static final String GROUND_MARKER_REGION_PREFIX = "region_";
 
 	private final WidgetMenuOption dockMenu = new WidgetMenuOption(
-		"Show", "Extended Map MapDock", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
+		"Show", "Extended Map Dock", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
 	);
 
 	private final WidgetMenuOption windowMenu = new WidgetMenuOption(
-		"Show", "Extended Map MapWindow", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
+		"Show", "Extended Map Window", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
 	);
 
 	@Inject
@@ -71,18 +72,38 @@ public class ExtendedWorldMapPlugin extends Plugin
 	private FileManager fileManager;
 
 	private MapWindow mapFrame;
+
 	private MapDock mapDock;
+
+	private MapPanel mapPanel;
+
+	private static void detachFromParentIfNeeded(MapPanel panel)
+	{
+		if (panel == null)
+		{
+			return;
+		}
+
+		Container parent = panel.getParent();
+		if (parent != null)
+		{
+			try
+			{
+				parent.remove(panel);
+				parent.revalidate();
+				parent.repaint();
+			}
+			catch (Throwable ignore)
+			{
+			}
+		}
+	}
 
 	private boolean isClientReady()
 	{
 		return client != null
 			&& client.getGameState() == GameState.LOGGED_IN
 			&& client.getLocalPlayer() != null;
-	}
-
-	@Override
-	public void configure(Binder binder)
-	{
 	}
 
 	@Override
@@ -124,10 +145,17 @@ public class ExtendedWorldMapPlugin extends Plugin
 		SwingUtilities.invokeLater(() ->
 		{
 			closeDockOnEdt();
+
 			if (mapFrame != null)
 			{
 				mapFrame.dispose();
 				mapFrame = null;
+			}
+
+			if (mapPanel != null)
+			{
+				mapPanel.shutdown();
+				mapPanel = null;
 			}
 
 			menuManager.removeManagedCustomMenu(dockMenu);
@@ -135,6 +163,15 @@ public class ExtendedWorldMapPlugin extends Plugin
 
 			fileManager = null;
 		});
+	}
+
+	private MapPanel getOrCreatePanel()
+	{
+		if (mapPanel == null)
+		{
+			mapPanel = new MapPanel(client, config, fileManager, configManager, gson);
+		}
+		return mapPanel;
 	}
 
 	private void openWindow()
@@ -148,15 +185,21 @@ public class ExtendedWorldMapPlugin extends Plugin
 
 			closeDockOnEdt();
 
+			MapPanel panel = getOrCreatePanel();
+			detachFromParentIfNeeded(panel);
+
 			if (mapFrame == null || !mapFrame.isDisplayable())
 			{
-				mapFrame = new MapWindow(client, config, fileManager, configManager, gson);
+				mapFrame = new MapWindow(panel);
 			}
 
 			mapFrame.setVisible(true);
 			mapFrame.toFront();
 
+			panel.loadMapIfNeeded();
 			mapFrame.refreshGroundMarkers();
+
+			SwingUtilities.invokeLater(panel::focusPlayer);
 		});
 	}
 
@@ -171,12 +214,26 @@ public class ExtendedWorldMapPlugin extends Plugin
 
 			if (wantDock)
 			{
+				if (mapFrame != null && mapFrame.isDisplayable())
+				{
+					mapFrame.dispose();
+					mapFrame = null;
+				}
+
+				MapPanel panel = getOrCreatePanel();
+				detachFromParentIfNeeded(panel);
+
 				if (mapDock == null || !mapDock.isDisplayable())
 				{
-					mapDock = new MapDock(client, config, fileManager, client.getCanvas(), configManager, gson);
+					mapDock = new MapDock(panel, client.getCanvas(), configManager);
 				}
+
 				mapDock.openWithinOwner();
+
+				panel.loadMapIfNeeded();
 				mapDock.refreshGroundMarkers();
+
+				SwingUtilities.invokeLater(panel::focusPlayer);
 			}
 			else
 			{

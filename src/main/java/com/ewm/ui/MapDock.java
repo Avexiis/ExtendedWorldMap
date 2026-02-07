@@ -1,8 +1,5 @@
 package com.ewm.ui;
 
-import com.ewm.ExtendedWorldMapConfig;
-import com.ewm.store.FileManager;
-import com.google.gson.Gson;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -17,14 +14,19 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Window;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import javax.annotation.Nullable;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.border.LineBorder;
-import net.runelite.api.Client;
 import net.runelite.client.config.ConfigManager;
 
 public class MapDock extends JDialog
@@ -34,12 +36,26 @@ public class MapDock extends JDialog
 	private static final int SAFE_INIT_W = 386;
 	private static final int SAFE_INIT_H = 251;
 
+	private static final int MIN_W = 340;
+	private static final int MIN_H = 260;
+
+	private static final String CFG_GROUP = "extendedworldmap";
+	private static final String KEY_DOCK_X = "dock_x";
+	private static final String KEY_DOCK_Y = "dock_y";
+	private static final String KEY_DOCK_W = "dock_w";
+	private static final String KEY_DOCK_H = "dock_h";
+
 	private final MapPanel panel;
 	private final PanelSidebar sidebar;
 	private final Overlay overlay = new Overlay();
-	private boolean showTip = true;
+	private final boolean showTip = true;
 
-	public MapDock(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, Component ownerForLocation, ConfigManager configManager, Gson gson)
+	@Nullable
+	private final ConfigManager configManager;
+
+	private final Timer saveBoundsDebounce;
+
+	public MapDock(MapPanel sharedPanel, Component ownerForLocation, @Nullable ConfigManager configManager)
 	{
 		super(SwingUtilities.getWindowAncestor(ownerForLocation), "Extended World Map (Docked)", ModalityType.MODELESS);
 		setUndecorated(true);
@@ -47,24 +63,45 @@ public class MapDock extends JDialog
 		getRootPane().setBorder(new LineBorder(new Color(90, 90, 90), BORDER_PX, false));
 		setLayout(new BorderLayout());
 
-		panel = new MapPanel(client, cfg, mapFiles, configManager, gson);
-		sidebar = new PanelSidebar(panel, false);
+		this.panel = sharedPanel;
+		this.sidebar = new PanelSidebar(panel, false);
+		this.configManager = configManager;
 
 		JPanel content = new JPanel(new BorderLayout());
 		content.add(panel, BorderLayout.CENTER);
 		content.add(sidebar, BorderLayout.EAST);
-
 		add(content, BorderLayout.CENTER);
 
 		getRootPane().setGlassPane(overlay);
 		overlay.setVisible(true);
 
+		saveBoundsDebounce = new Timer(250, e -> saveDockBoundsNow());
+		saveBoundsDebounce.setRepeats(false);
+
 		applyInitialDockBounds(ownerForLocation);
 
 		enableEdgeDragResize();
+		installAutoSaveListeners();
 
-		panel.loadMap();
+		panel.loadMapIfNeeded();
 		panel.setDockShiftDragEnabled(true);
+
+		addWindowListener(new WindowAdapter()
+		{
+			@Override
+			public void windowClosing(WindowEvent e)
+			{
+				panel.setTrackPlayer(false);
+				saveDockBoundsNow();
+			}
+
+			@Override
+			public void windowClosed(WindowEvent e)
+			{
+				panel.setTrackPlayer(false);
+				saveDockBoundsNow();
+			}
+		});
 	}
 
 	public void refreshGroundMarkers()
@@ -82,10 +119,129 @@ public class MapDock extends JDialog
 
 		setVisible(true);
 		toFront();
+
+		scheduleSaveDockBounds();
+	}
+
+	private void installAutoSaveListeners()
+	{
+		addComponentListener(new ComponentAdapter()
+		{
+			@Override
+			public void componentResized(ComponentEvent e)
+			{
+				scheduleSaveDockBounds();
+			}
+
+			@Override
+			public void componentMoved(ComponentEvent e)
+			{
+				scheduleSaveDockBounds();
+			}
+
+			@Override
+			public void componentShown(ComponentEvent e)
+			{
+				scheduleSaveDockBounds();
+			}
+		});
+	}
+
+	private void scheduleSaveDockBounds()
+	{
+		if (configManager == null)
+		{
+			return;
+		}
+		if (!isDisplayable())
+		{
+			return;
+		}
+		saveBoundsDebounce.restart();
+	}
+
+	private void saveDockBoundsNow()
+	{
+		if (configManager == null)
+		{
+			return;
+		}
+		if (!isDisplayable())
+		{
+			return;
+		}
+
+		Rectangle b = getBounds();
+
+		int w = Math.max(MIN_W, b.width);
+		int h = Math.max(MIN_H, b.height);
+		int x = b.x;
+		int y = b.y;
+
+		configManager.setConfiguration(CFG_GROUP, KEY_DOCK_X, Integer.toString(x));
+		configManager.setConfiguration(CFG_GROUP, KEY_DOCK_Y, Integer.toString(y));
+		configManager.setConfiguration(CFG_GROUP, KEY_DOCK_W, Integer.toString(w));
+		configManager.setConfiguration(CFG_GROUP, KEY_DOCK_H, Integer.toString(h));
+	}
+
+	@Nullable
+	private Integer getIntCfg(String key)
+	{
+		if (configManager == null)
+		{
+			return null;
+		}
+
+		String v = configManager.getConfiguration(CFG_GROUP, key);
+		if (v == null || v.trim().isEmpty())
+		{
+			return null;
+		}
+
+		try
+		{
+			return Integer.parseInt(v.trim());
+		}
+		catch (Exception ex)
+		{
+			return null;
+		}
+	}
+
+	private boolean tryRestoreDockBounds(Component ownerForLocation)
+	{
+		Integer x = getIntCfg(KEY_DOCK_X);
+		Integer y = getIntCfg(KEY_DOCK_Y);
+		Integer w = getIntCfg(KEY_DOCK_W);
+		Integer h = getIntCfg(KEY_DOCK_H);
+
+		if (x == null || y == null || w == null || h == null)
+		{
+			return false;
+		}
+
+		int rw = Math.max(MIN_W, Math.min(w, 10000));
+		int rh = Math.max(MIN_H, Math.min(h, 10000));
+
+		setSize(new Dimension(rw, rh));
+		setLocation(x, y);
+
+		Window owner = SwingUtilities.getWindowAncestor(ownerForLocation);
+		if (owner != null)
+		{
+			clampInsideOwner();
+		}
+
+		return true;
 	}
 
 	private void applyInitialDockBounds(Component ownerForLocation)
 	{
+		if (tryRestoreDockBounds(ownerForLocation))
+		{
+			return;
+		}
+
 		Window owner = SwingUtilities.getWindowAncestor(ownerForLocation);
 		if (owner == null)
 		{
@@ -99,8 +255,8 @@ public class MapDock extends JDialog
 		int w = safe.width;
 		int h = safe.height;
 
-		w = Math.max(340, Math.min(w, safe.width));
-		h = Math.max(260, Math.min(h, safe.height));
+		w = Math.max(MIN_W, Math.min(w, safe.width));
+		h = Math.max(MIN_H, Math.min(h, safe.height));
 
 		w = Math.min(w, safe.width);
 		h = Math.min(h, safe.height);
@@ -241,6 +397,12 @@ public class MapDock extends JDialog
 			}
 
 			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				scheduleSaveDockBounds();
+			}
+
+			@Override
 			public void mouseDragged(MouseEvent e)
 			{
 				if (dragStart == null || startBounds == null)
@@ -280,13 +442,15 @@ public class MapDock extends JDialog
 						b.width += dx;
 					}
 
-					b.width = Math.max(340, b.width);
-					b.height = Math.max(260, b.height);
+					b.width = Math.max(MIN_W, b.width);
+					b.height = Math.max(MIN_H, b.height);
 				}
 
 				setBounds(b);
 				clampInsideOwner();
 				repaint();
+
+				scheduleSaveDockBounds();
 			}
 
 			@Override
@@ -335,6 +499,8 @@ public class MapDock extends JDialog
 						repaint();
 						MapDock.this.revalidate();
 						MapDock.this.repaint();
+
+						scheduleSaveDockBounds();
 					}
 				}
 			});

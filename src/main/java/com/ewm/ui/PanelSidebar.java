@@ -116,17 +116,17 @@ class PanelSidebar extends JPanel
 		content.setOpaque(false);
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
-		JCheckBox showPlayer = new JCheckBox("Show Player", true);
-		JCheckBox showGrid = new JCheckBox("Show Region Grid", false);
-		JCheckBox showMarkers = new JCheckBox("Show Ground Markers", true);
-		JCheckBox trackPlayer = new JCheckBox("Track Player", false);
+		JCheckBox showPlayer = new JCheckBox("Show Player", panel.isShowPlayer());
+		JCheckBox showGrid = new JCheckBox("Show Region Grid", panel.isShowGrid());
+		JCheckBox showMarkers = new JCheckBox("Show Ground Markers", panel.isShowGroundMarkers());
+		JCheckBox trackPlayer = new JCheckBox("Track Player", panel.isTrackPlayer());
 
 		JButton jumpToPlayer = new JButton("Jump To Player");
 
 		JComboBox<String> planeBox = new JComboBox<>(new String[]{
 			"Ground", "Floor 1", "Floor 2", "Floor 3"
 		});
-		planeBox.setSelectedIndex(0);
+		planeBox.setSelectedIndex(panel.getCurrentPlane());
 
 		showPlayer.setAlignmentX(Component.LEFT_ALIGNMENT);
 		showGrid.setAlignmentX(Component.LEFT_ALIGNMENT);

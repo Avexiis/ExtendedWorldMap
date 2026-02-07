@@ -1,24 +1,21 @@
 package com.ewm.ui;
 
-import com.ewm.ExtendedWorldMapConfig;
-import com.ewm.store.FileManager;
-import com.google.gson.Gson;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.WindowConstants;
-import net.runelite.api.Client;
-import net.runelite.client.config.ConfigManager;
 
 public class MapWindow extends JFrame
 {
 	private final MapPanel panel;
 
-	public MapWindow(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, ConfigManager configManager, Gson gson)
+	public MapWindow(MapPanel sharedPanel)
 	{
 		super("Extended World Map");
 		setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -27,7 +24,7 @@ public class MapWindow extends JFrame
 		setResizable(true);
 		setLayout(new BorderLayout());
 
-		panel = new MapPanel(client, cfg, mapFiles, configManager, gson);
+		panel = sharedPanel;
 		PanelSidebar sidebar = new PanelSidebar(panel);
 
 		JPanel content = new JPanel(new BorderLayout());
@@ -62,7 +59,22 @@ public class MapWindow extends JFrame
 			setLocationByPlatform(true);
 		}
 
-		panel.loadMap();
+		panel.loadMapIfNeeded();
+
+		addWindowListener(new WindowAdapter()
+		{
+			@Override
+			public void windowClosing(WindowEvent e)
+			{
+				panel.setTrackPlayer(false);
+			}
+
+			@Override
+			public void windowClosed(WindowEvent e)
+			{
+				panel.setTrackPlayer(false);
+			}
+		});
 	}
 
 	public void refreshGroundMarkers()
