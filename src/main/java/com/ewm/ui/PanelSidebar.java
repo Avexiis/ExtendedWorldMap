@@ -1,6 +1,7 @@
 package com.ewm.ui;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -16,8 +17,10 @@ import javax.swing.border.EmptyBorder;
 
 class PanelSidebar extends JPanel
 {
-	static final int EXPANDED_WIDTH = 160;
+	static final int EXPANDED_WIDTH = 170;
 	static final int COLLAPSED_WIDTH = 22;
+
+	private static final Color SIDEBAR_BG = new Color(30, 30, 30);
 
 	private final MapPanel panel;
 	private final boolean showInternalToggleButtons;
@@ -39,7 +42,9 @@ class PanelSidebar extends JPanel
 		this.showInternalToggleButtons = showInternalToggleButtons;
 
 		setLayout(new BorderLayout());
-		setOpaque(false);
+
+		setOpaque(true);
+		setBackground(SIDEBAR_BG);
 
 		buildExpanded();
 		buildCollapsed();
@@ -60,7 +65,9 @@ class PanelSidebar extends JPanel
 	private void buildCollapsed()
 	{
 		collapsedPanel.setLayout(new BorderLayout());
-		collapsedPanel.setOpaque(false);
+
+		collapsedPanel.setOpaque(true);
+		collapsedPanel.setBackground(SIDEBAR_BG);
 
 		if (showInternalToggleButtons)
 		{
@@ -77,13 +84,17 @@ class PanelSidebar extends JPanel
 	private void buildExpanded()
 	{
 		expandedPanel.setLayout(new BorderLayout());
-		expandedPanel.setOpaque(false);
+
+		expandedPanel.setOpaque(true);
+		expandedPanel.setBackground(SIDEBAR_BG);
+
 		expandedPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
 
 		JPanel header = new JPanel(new BorderLayout(6, 0));
 		header.setOpaque(false);
 
 		JLabel title = new JLabel("Controls");
+		title.setForeground(new Color(220, 220, 220));
 		header.add(title, BorderLayout.WEST);
 
 		if (showInternalToggleButtons)
@@ -107,8 +118,7 @@ class PanelSidebar extends JPanel
 
 		JCheckBox showPlayer = new JCheckBox("Show Player", true);
 		JCheckBox showGrid = new JCheckBox("Show Region Grid", false);
-		JCheckBox showRxRy = new JCheckBox("Show Region Coords", false);
-		JCheckBox showRegionId = new JCheckBox("Show Region ID", false);
+		JCheckBox showMarkers = new JCheckBox("Show Ground Markers", true);
 		JCheckBox trackPlayer = new JCheckBox("Track Player", false);
 
 		JButton jumpToPlayer = new JButton("Jump To Player");
@@ -120,8 +130,7 @@ class PanelSidebar extends JPanel
 
 		showPlayer.setAlignmentX(Component.LEFT_ALIGNMENT);
 		showGrid.setAlignmentX(Component.LEFT_ALIGNMENT);
-		showRxRy.setAlignmentX(Component.LEFT_ALIGNMENT);
-		showRegionId.setAlignmentX(Component.LEFT_ALIGNMENT);
+		showMarkers.setAlignmentX(Component.LEFT_ALIGNMENT);
 		trackPlayer.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		jumpToPlayer.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -129,26 +138,7 @@ class PanelSidebar extends JPanel
 
 		showPlayer.addActionListener(e -> panel.setShowPlayer(showPlayer.isSelected()));
 		showGrid.addActionListener(e -> panel.setShowGrid(showGrid.isSelected()));
-
-		showRxRy.addActionListener(e ->
-		{
-			if (showRxRy.isSelected())
-			{
-				showRegionId.setSelected(false);
-			}
-			panel.setShowRxRy(showRxRy.isSelected());
-			panel.setShowRegionId(showRegionId.isSelected());
-		});
-
-		showRegionId.addActionListener(e ->
-		{
-			if (showRegionId.isSelected())
-			{
-				showRxRy.setSelected(false);
-			}
-			panel.setShowRegionId(showRegionId.isSelected());
-			panel.setShowRxRy(showRxRy.isSelected());
-		});
+		showMarkers.addActionListener(e -> panel.setShowGroundMarkers(showMarkers.isSelected()));
 
 		trackPlayer.addActionListener(e -> panel.setTrackPlayer(trackPlayer.isSelected()));
 		jumpToPlayer.addActionListener(e -> panel.focusPlayer());
@@ -165,8 +155,7 @@ class PanelSidebar extends JPanel
 
 		content.add(showPlayer);
 		content.add(showGrid);
-		content.add(showRxRy);
-		content.add(showRegionId);
+		content.add(showMarkers);
 		content.add(trackPlayer);
 
 		content.add(Box.createVerticalStrut(8));
@@ -175,7 +164,9 @@ class PanelSidebar extends JPanel
 
 		JPanel floorRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
 		floorRow.setOpaque(false);
-		floorRow.add(new JLabel("Floor:"));
+		JLabel floorLabel = new JLabel("Floor:");
+		floorLabel.setForeground(new Color(220, 220, 220));
+		floorRow.add(floorLabel);
 		floorRow.add(planeBox);
 		floorRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 

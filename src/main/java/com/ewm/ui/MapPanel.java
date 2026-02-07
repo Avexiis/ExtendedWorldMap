@@ -1,14 +1,16 @@
 package com.ewm.ui;
 
 import com.ewm.ExtendedWorldMapConfig;
-import com.ewm.store.FileManager;
+import com.ewm.ground.GroundMarkerIndex;
+import com.ewm.ground.WorldTileMarker;
 import com.ewm.io.IOUtil;
-import com.ewm.store.MapReader;
+import com.ewm.store.FileManager;
 import com.ewm.store.ImageCache;
+import com.ewm.store.MapReader;
+import com.google.gson.Gson;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
@@ -33,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.annotation.Nullable;
 import javax.swing.ImageIcon;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -45,6 +48,7 @@ import javax.swing.ToolTipManager;
 import javax.swing.border.EmptyBorder;
 import net.runelite.api.Client;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.config.ConfigManager;
 
 class MapPanel extends JPanel
 {
@@ -63,6 +67,11 @@ class MapPanel extends JPanel
 	private final Client client;
 	private final ExtendedWorldMapConfig cfg;
 	private final FileManager mapFiles;
+
+	private final ConfigManager configManager;
+	private final Gson gson;
+
+	private final GroundMarkerIndex groundMarkers = new GroundMarkerIndex();
 
 	private final ImageCache tileCache;
 	private final Set<String> inflight = ConcurrentHashMap.newKeySet();
@@ -85,8 +94,7 @@ class MapPanel extends JPanel
 
 	private boolean showPlayer = true;
 	private boolean showGrid = false;
-	private boolean showRxRy = false;
-	private boolean showRegionId = false;
+	private boolean showGroundMarkers = true;
 	private boolean trackPlayer = false;
 	private boolean dockShiftDragEnabled = false;
 
@@ -118,11 +126,17 @@ class MapPanel extends JPanel
 	private Rectangle playerIconBounds = null;
 	private String playerIconTooltip = null;
 
-	MapPanel(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles)
+	private Rectangle hoveredMarkerScreenBounds = null;
+	private String hoveredMarkerTooltip = null;
+
+	MapPanel(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, ConfigManager configManager, Gson gson)
 	{
 		this.client = client;
 		this.cfg = cfg;
 		this.mapFiles = mapFiles;
+		this.configManager = configManager;
+		this.gson = gson;
+
 		this.tileCache = new ImageCache((long) cfg.cacheBudgetMB() * 1024L * 1024L);
 
 		setBackground(Color.BLACK);
@@ -268,6 +282,33 @@ class MapPanel extends JPanel
 		return up + t.substring(1);
 	}
 
+	public void reloadGroundMarkersAsync()
+	{
+		loader.execute(() ->
+		{
+			try
+			{
+				if (configManager == null || gson == null)
+				{
+					return;
+				}
+				if (map == null)
+				{
+					return;
+				}
+
+				groundMarkers.loadAllForBounds(configManager, gson, minRx, minRy, maxRx, maxRy);
+			}
+			catch (Throwable ignore)
+			{
+			}
+			finally
+			{
+				SwingUtilities.invokeLater(this::repaint);
+			}
+		});
+	}
+
 	void setDockShiftDragEnabled(boolean b)
 	{
 		dockShiftDragEnabled = b;
@@ -285,15 +326,21 @@ class MapPanel extends JPanel
 		repaint();
 	}
 
-	void setShowRxRy(boolean b)
+	void setShowGroundMarkers(boolean b)
 	{
-		showRxRy = b;
-		repaint();
-	}
+		showGroundMarkers = b;
+		hoveredMarkerScreenBounds = null;
+		hoveredMarkerTooltip = null;
 
-	void setShowRegionId(boolean b)
-	{
-		showRegionId = b;
+		if (!b)
+		{
+			groundMarkers.clear();
+		}
+		else
+		{
+			reloadGroundMarkersAsync();
+		}
+
 		repaint();
 	}
 
@@ -370,6 +417,11 @@ class MapPanel extends JPanel
 				}
 
 				hereIcon = loadGifIcon("/extendedworldmap/You_are_here.gif");
+
+				if (configManager != null && gson != null)
+				{
+					groundMarkers.loadAllForBounds(configManager, gson, minRx, minRy, maxRx, maxRy);
+				}
 			}
 			catch (Throwable t)
 			{
@@ -433,6 +485,9 @@ class MapPanel extends JPanel
 		playerIconBounds = null;
 		playerIconTooltip = null;
 
+		hoveredMarkerScreenBounds = null;
+		hoveredMarkerTooltip = null;
+
 		Graphics2D g = (Graphics2D) g0.create();
 		g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
 		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -452,7 +507,12 @@ class MapPanel extends JPanel
 
 		drawTiles(g, LOD.forZoom(zoom));
 		drawGrid(g);
-		drawLabels(g);
+
+		if (showGroundMarkers)
+		{
+			drawGroundMarkers(g);
+			updateHoveredMarkerTooltip();
+		}
 
 		g.setTransform(old);
 		drawPlayerIcon(g);
@@ -463,15 +523,25 @@ class MapPanel extends JPanel
 	@Override
 	public String getToolTipText(MouseEvent event)
 	{
-		if (playerIconBounds == null || playerIconTooltip == null)
-		{
-			return null;
-		}
 		if (event == null)
 		{
 			return null;
 		}
-		return playerIconBounds.contains(event.getPoint()) ? playerIconTooltip : null;
+
+		if (playerIconBounds != null && playerIconTooltip != null && playerIconBounds.contains(event.getPoint()))
+		{
+			return playerIconTooltip;
+		}
+
+		if (showGroundMarkers
+			&& hoveredMarkerScreenBounds != null
+			&& hoveredMarkerTooltip != null
+			&& hoveredMarkerScreenBounds.contains(event.getPoint()))
+		{
+			return hoveredMarkerTooltip;
+		}
+
+		return null;
 	}
 
 	private void drawTiles(Graphics2D g, LOD lod)
@@ -598,67 +668,162 @@ class MapPanel extends JPanel
 		}
 
 		Shape clipOld = g.getClip();
-		g.setClip(new Rectangle2D.Double(0, 0, totalW, totalH));
-		g.setColor(new Color(255, 255, 255, 90));
-		g.setStroke(new BasicStroke(0));
 
-		int c0 = Math.max(0, (int) Math.floor(viewX / GAME_REGION_SIZE));
-		int r0 = Math.max(0, (int) Math.floor(viewY / GAME_REGION_SIZE));
-		int c1 = Math.min(cols, (int) Math.ceil((viewX + getWidth() / zoom) / GAME_REGION_SIZE));
-		int r1 = Math.min(rows, (int) Math.ceil((viewY + getHeight() / zoom) / GAME_REGION_SIZE));
+		g.clip(new Rectangle2D.Double(0, 0, totalW, totalH));
 
-		for (int c = c0; c <= c1; c++)
+		try
 		{
-			int x = c * GAME_REGION_SIZE;
-			g.drawLine(x, r0 * GAME_REGION_SIZE, x, r1 * GAME_REGION_SIZE);
-		}
-		for (int r = r0; r <= r1; r++)
-		{
-			int y = r * GAME_REGION_SIZE;
-			g.drawLine(c0 * GAME_REGION_SIZE, y, c1 * GAME_REGION_SIZE, y);
-		}
+			g.setColor(new Color(255, 255, 255, 90));
+			g.setStroke(new BasicStroke(0));
 
-		g.setClip(clipOld);
+			int c0 = Math.max(0, (int) Math.floor(viewX / GAME_REGION_SIZE));
+			int r0 = Math.max(0, (int) Math.floor(viewY / GAME_REGION_SIZE));
+			int c1 = Math.min(cols, (int) Math.ceil((viewX + getWidth() / zoom) / GAME_REGION_SIZE));
+			int r1 = Math.min(rows, (int) Math.ceil((viewY + getHeight() / zoom) / GAME_REGION_SIZE));
+
+			for (int c = c0; c <= c1; c++)
+			{
+				int x = c * GAME_REGION_SIZE;
+				g.drawLine(x, r0 * GAME_REGION_SIZE, x, r1 * GAME_REGION_SIZE);
+			}
+			for (int r = r0; r <= r1; r++)
+			{
+				int y = r * GAME_REGION_SIZE;
+				g.drawLine(c0 * GAME_REGION_SIZE, y, c1 * GAME_REGION_SIZE, y);
+			}
+		}
+		finally
+		{
+			g.setClip(clipOld);
+		}
 	}
 
-	private void drawLabels(Graphics2D g)
+	private void drawGroundMarkers(Graphics2D g)
 	{
-		if (!showRxRy && !showRegionId)
+		List<WorldTileMarker> markers = groundMarkers.snapshot();
+		if (markers.isEmpty())
 		{
 			return;
 		}
 
 		Shape clipOld = g.getClip();
-		g.setClip(new Rectangle2D.Double(0, 0, totalW, totalH));
-		g.setColor(new Color(255, 255, 0, 220));
-		g.setFont(getFont().deriveFont(20f));
-		FontMetrics fm = g.getFontMetrics();
 
-		int c0 = Math.max(0, (int) Math.floor(viewX / GAME_REGION_SIZE));
-		int r0 = Math.max(0, (int) Math.floor(viewY / GAME_REGION_SIZE));
-		int c1 = Math.min(cols - 1, (int) Math.floor((viewX + getWidth() / zoom) / GAME_REGION_SIZE));
-		int r1 = Math.min(rows - 1, (int) Math.floor((viewY + getHeight() / zoom) / GAME_REGION_SIZE));
+		g.clip(new Rectangle2D.Double(0, 0, totalW, totalH));
 
-		for (int r = r0; r <= r1; r++)
+		try
 		{
-			int worldRy = maxRy - r;
-			int yCenter = r * GAME_REGION_SIZE + GAME_REGION_SIZE / 2;
-			int yBaseline = yCenter + fm.getAscent() / 2;
+			BasicStroke border = new BasicStroke(0f);
 
-			for (int c = c0; c <= c1; c++)
+			double vw = getWidth() / zoom;
+			double vh = getHeight() / zoom;
+
+			int vx1 = (int) Math.floor(viewX);
+			int vy1 = (int) Math.floor(viewY);
+			int vx2 = (int) Math.ceil(viewX + vw);
+			int vy2 = (int) Math.ceil(viewY + vh);
+
+			for (WorldTileMarker m : markers)
 			{
-				int worldRx = minRx + c;
-				String text = showRxRy
-					? (worldRx + "," + worldRy)
-					: Integer.toString((worldRx << 8) | worldRy);
+				if (m.getPlane() != currentPlane)
+				{
+					continue;
+				}
 
-				int xCenter = c * GAME_REGION_SIZE + GAME_REGION_SIZE / 2;
-				int tw = fm.stringWidth(text);
-				g.drawString(text, xCenter - tw / 2, yBaseline);
+				int px = worldXToMapTileX(m.getWorldX());
+				int py = worldYToMapTileY(m.getWorldY());
+
+				if (px < vx1 - 1 || px > vx2 + 1 || py < vy1 - 1 || py > vy2 + 1)
+				{
+					continue;
+				}
+
+				Color base = m.getColor();
+				if (base == null)
+				{
+					base = new Color(255, 255, 0, 255);
+				}
+
+				Color borderColor = new Color(base.getRed(), base.getGreen(), base.getBlue(), 220);
+				Color fillColor = new Color(base.getRed(), base.getGreen(), base.getBlue(), 70);
+
+				g.setStroke(border);
+				g.setColor(fillColor);
+				g.fillRect(px, py, 1, 1);
+
+				g.setColor(borderColor);
+				g.drawRect(px, py, 1, 1);
 			}
 		}
+		finally
+		{
+			g.setClip(clipOld);
+		}
+	}
 
-		g.setClip(clipOld);
+	private void updateHoveredMarkerTooltip()
+	{
+		if (mouseX < 0 || mouseY < 0)
+		{
+			return;
+		}
+
+		double lx = viewX + (mouseX / zoom);
+		double ly = viewY + (mouseY / zoom);
+
+		int tileX = (int) Math.floor(lx);
+		int tileY = (int) Math.floor(ly);
+
+		WorldPoint wp = mapTileToWorldPoint(tileX, tileY, currentPlane);
+		if (wp == null)
+		{
+			return;
+		}
+
+		WorldTileMarker marker = groundMarkers.getAt(currentPlane, wp.getX(), wp.getY());
+		if (marker == null)
+		{
+			return;
+		}
+
+		String label = marker.getLabel();
+		if (label == null || label.trim().isEmpty())
+		{
+			return;
+		}
+
+		hoveredMarkerTooltip = label.trim();
+
+		int sx = (int) Math.floor((tileX - viewX) * zoom);
+		int sy = (int) Math.floor((tileY - viewY) * zoom);
+		int sw = (int) Math.ceil(zoom);
+		int sh = (int) Math.ceil(zoom);
+
+		hoveredMarkerScreenBounds = new Rectangle(sx, sy, Math.max(1, sw), Math.max(1, sh));
+	}
+
+	private int worldXToMapTileX(int worldX)
+	{
+		return worldX - (minRx * 64);
+	}
+
+	private int worldYToMapTileY(int worldY)
+	{
+		int localY = worldY - (minRy * 64);
+		return (totalH - 1) - localY;
+	}
+
+	@Nullable
+	private WorldPoint mapTileToWorldPoint(int mapTileX, int mapTileY, int plane)
+	{
+		int worldX = (minRx * 64) + mapTileX;
+		int worldY = (minRy * 64) + ((totalH - 1) - mapTileY);
+
+		if (mapTileX < 0 || mapTileX >= totalW || mapTileY < 0 || mapTileY >= totalH)
+		{
+			return null;
+		}
+
+		return new WorldPoint(worldX, worldY, plane);
 	}
 
 	private void drawPlayerIcon(Graphics2D g)

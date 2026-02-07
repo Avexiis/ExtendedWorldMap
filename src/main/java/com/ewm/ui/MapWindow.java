@@ -2,6 +2,7 @@ package com.ewm.ui;
 
 import com.ewm.ExtendedWorldMapConfig;
 import com.ewm.store.FileManager;
+import com.google.gson.Gson;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.GraphicsConfiguration;
@@ -11,12 +12,13 @@ import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.WindowConstants;
 import net.runelite.api.Client;
+import net.runelite.client.config.ConfigManager;
 
-public class Window extends JFrame
+public class MapWindow extends JFrame
 {
 	private final MapPanel panel;
 
-	public Window(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles)
+	public MapWindow(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, ConfigManager configManager, Gson gson)
 	{
 		super("Extended World Map");
 		setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -25,7 +27,7 @@ public class Window extends JFrame
 		setResizable(true);
 		setLayout(new BorderLayout());
 
-		panel = new MapPanel(client, cfg, mapFiles);
+		panel = new MapPanel(client, cfg, mapFiles, configManager, gson);
 		PanelSidebar sidebar = new PanelSidebar(panel);
 
 		JPanel content = new JPanel(new BorderLayout());
@@ -61,5 +63,10 @@ public class Window extends JFrame
 		}
 
 		panel.loadMap();
+	}
+
+	public void refreshGroundMarkers()
+	{
+		panel.reloadGroundMarkersAsync();
 	}
 }

@@ -2,13 +2,13 @@ package com.ewm.ui;
 
 import com.ewm.ExtendedWorldMapConfig;
 import com.ewm.store.FileManager;
+import com.google.gson.Gson;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -25,20 +25,21 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.LineBorder;
 import net.runelite.api.Client;
+import net.runelite.client.config.ConfigManager;
 
-public class Dock extends JDialog
+public class MapDock extends JDialog
 {
 	private static final int BORDER_PX = 5;
 
-	private static final int SAFE_INIT_W = 514;
-	private static final int SAFE_INIT_H = 334;
+	private static final int SAFE_INIT_W = 386;
+	private static final int SAFE_INIT_H = 251;
 
 	private final MapPanel panel;
 	private final PanelSidebar sidebar;
 	private final Overlay overlay = new Overlay();
 	private boolean showTip = true;
 
-	public Dock(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, Component ownerForLocation)
+	public MapDock(Client client, ExtendedWorldMapConfig cfg, FileManager mapFiles, Component ownerForLocation, ConfigManager configManager, Gson gson)
 	{
 		super(SwingUtilities.getWindowAncestor(ownerForLocation), "Extended World Map (Docked)", ModalityType.MODELESS);
 		setUndecorated(true);
@@ -46,7 +47,7 @@ public class Dock extends JDialog
 		getRootPane().setBorder(new LineBorder(new Color(90, 90, 90), BORDER_PX, false));
 		setLayout(new BorderLayout());
 
-		panel = new MapPanel(client, cfg, mapFiles);
+		panel = new MapPanel(client, cfg, mapFiles, configManager, gson);
 		sidebar = new PanelSidebar(panel, false);
 
 		JPanel content = new JPanel(new BorderLayout());
@@ -64,6 +65,11 @@ public class Dock extends JDialog
 
 		panel.loadMap();
 		panel.setDockShiftDragEnabled(true);
+	}
+
+	public void refreshGroundMarkers()
+	{
+		panel.reloadGroundMarkersAsync();
 	}
 
 	public void openWithinOwner()
@@ -222,7 +228,7 @@ public class Dock extends JDialog
 
 			private Point toDialog(MouseEvent e)
 			{
-				return SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), Dock.this);
+				return SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), MapDock.this);
 			}
 
 			@Override
@@ -319,7 +325,7 @@ public class Dock extends JDialog
 				{
 					if (hitCloseDock(e.getX(), e.getY()))
 					{
-						Dock.this.dispose();
+						MapDock.this.dispose();
 						return;
 					}
 					if (hitToggleSidebar(e.getX(), e.getY()))
@@ -327,8 +333,8 @@ public class Dock extends JDialog
 						sidebar.toggleExpanded();
 
 						repaint();
-						Dock.this.revalidate();
-						Dock.this.repaint();
+						MapDock.this.revalidate();
+						MapDock.this.repaint();
 					}
 				}
 			});
@@ -385,7 +391,6 @@ public class Dock extends JDialog
 			Rectangle rClose = closeRect();
 			Rectangle rToggle = toggleRect();
 
-			//Close (X)
 			g.setColor(new Color(0, 0, 0, 160));
 			g.fillRoundRect(rClose.x, rClose.y, rClose.width, rClose.height, ARC, ARC);
 
@@ -403,9 +408,8 @@ public class Dock extends JDialog
 			g.setStroke(new BasicStroke(2f));
 			g.drawRoundRect(rToggle.x, rToggle.y, rToggle.width, rToggle.height, ARC, ARC);
 
-			//Hamburger icon
-			int padX = 5; //left-right padding inside the button
-			int gapY = 4; //vertical gap between lines
+			int padX = 5;
+			int gapY = 4;
 			int lineLen = rToggle.width - (padX * 2);
 
 			int cx = rToggle.x + rToggle.width / 2;

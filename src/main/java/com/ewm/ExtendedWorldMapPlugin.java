@@ -1,8 +1,9 @@
 package com.ewm;
 
 import com.ewm.store.FileManager;
-import com.ewm.ui.Dock;
-import com.ewm.ui.Window;
+import com.ewm.ui.MapDock;
+import com.ewm.ui.MapWindow;
+import com.google.gson.Gson;
 import com.google.inject.Binder;
 import com.google.inject.Provides;
 import javax.inject.Inject;
@@ -16,6 +17,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.menus.MenuManager;
 import net.runelite.client.menus.WidgetMenuOption;
 import net.runelite.client.plugins.Plugin;
@@ -34,12 +36,15 @@ public class ExtendedWorldMapPlugin extends Plugin
 	private static final int WORLDMAP_ORB_WIDGET_ID = InterfaceID.Orbs.WORLDMAP;
 	private static final int WORLDMAP_ORB_NOMAP_WIDGET_ID = InterfaceID.OrbsNomap.WORLDMAP;
 
+	private static final String GROUND_MARKER_GROUP = "groundMarker";
+	private static final String GROUND_MARKER_REGION_PREFIX = "region_";
+
 	private final WidgetMenuOption dockMenu = new WidgetMenuOption(
-		"Show", "Extended Map Dock", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
+		"Show", "Extended Map MapDock", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
 	);
 
 	private final WidgetMenuOption windowMenu = new WidgetMenuOption(
-		"Show", "Extended Map Window", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
+		"Show", "Extended Map MapWindow", WORLDMAP_ORB_WIDGET_ID, WORLDMAP_ORB_NOMAP_WIDGET_ID
 	);
 
 	@Inject
@@ -57,10 +62,16 @@ public class ExtendedWorldMapPlugin extends Plugin
 	@Inject
 	private OkHttpClient okHttpClient;
 
+	@Inject
+	private ConfigManager configManager;
+
+	@Inject
+	private Gson gson;
+
 	private FileManager fileManager;
 
-	private Window mapFrame;
-	private Dock mapDock;
+	private MapWindow mapFrame;
+	private MapDock mapDock;
 
 	private boolean isClientReady()
 	{
@@ -139,11 +150,13 @@ public class ExtendedWorldMapPlugin extends Plugin
 
 			if (mapFrame == null || !mapFrame.isDisplayable())
 			{
-				mapFrame = new Window(client, config, fileManager);
+				mapFrame = new MapWindow(client, config, fileManager, configManager, gson);
 			}
 
 			mapFrame.setVisible(true);
 			mapFrame.toFront();
+
+			mapFrame.refreshGroundMarkers();
 		});
 	}
 
@@ -160,9 +173,10 @@ public class ExtendedWorldMapPlugin extends Plugin
 			{
 				if (mapDock == null || !mapDock.isDisplayable())
 				{
-					mapDock = new Dock(client, config, fileManager, client.getCanvas());
+					mapDock = new MapDock(client, config, fileManager, client.getCanvas(), configManager, gson);
 				}
 				mapDock.openWithinOwner();
+				mapDock.refreshGroundMarkers();
 			}
 			else
 			{
@@ -195,6 +209,33 @@ public class ExtendedWorldMapPlugin extends Plugin
 				}
 			});
 		}
+	}
+
+	@Subscribe
+	private void onConfigChanged(ConfigChanged event)
+	{
+		if (!GROUND_MARKER_GROUP.equals(event.getGroup()))
+		{
+			return;
+		}
+
+		String key = event.getKey();
+		if (key == null || !key.startsWith(GROUND_MARKER_REGION_PREFIX))
+		{
+			return;
+		}
+
+		SwingUtilities.invokeLater(() ->
+		{
+			if (mapDock != null && mapDock.isDisplayable())
+			{
+				mapDock.refreshGroundMarkers();
+			}
+			if (mapFrame != null && mapFrame.isDisplayable())
+			{
+				mapFrame.refreshGroundMarkers();
+			}
+		});
 	}
 
 	@Provides
