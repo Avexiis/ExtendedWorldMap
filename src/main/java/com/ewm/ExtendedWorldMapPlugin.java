@@ -133,7 +133,7 @@ public class ExtendedWorldMapPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		fileManager = new FileManager(okHttpClient, FileManager.MAP_DOWNLOAD_URL);
+		fileManager = new FileManager(okHttpClient, FileManager.MAP_DOWNLOAD_URL, gson);
 
 		menuManager.addManagedCustomMenu(dockMenu, entry ->
 		{

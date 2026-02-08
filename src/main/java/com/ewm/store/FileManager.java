@@ -58,12 +58,13 @@ public final class FileManager
 
 	private final OkHttpClient http;
 	private final String mapUrl;
-	private final Gson gson = new Gson();
+	private final Gson gson;
 
-	public FileManager(OkHttpClient http, String mapUrl)
+	public FileManager(OkHttpClient http, String mapUrl, Gson gson)
 	{
 		this.http = Objects.requireNonNull(http, "http");
 		this.mapUrl = (mapUrl == null || mapUrl.isEmpty()) ? MAP_DOWNLOAD_URL : mapUrl;
+		this.gson = Objects.requireNonNull(gson, "gson");
 	}
 
 	private static long parseContentLength(@Nullable String s)
