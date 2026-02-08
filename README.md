@@ -1,6 +1,6 @@
 # <u>Extended World Map</u>
 <img src="https://i.imgur.com/hIFwtM4.jpeg" alt="Extended World Map" width="800"/><br>
-Extended World Map adds a fast, lightweight world map viewer to RuneLite. It is designed for viewing the game world as it actually exists with true 1:1 tile locations. This viewer operates much smoother than the vanilla world map, and allows you to freely pan around and see where OSRS *actually* brings you on your adventures, not just the very limited are offered by the vanilla map.<br>
+Extended World Map adds a fast, lightweight world map viewer to RuneLite. It is designed for viewing the game world as it actually exists with true 1:1 tile locations. This viewer operates much smoother than the vanilla world map, and allows you to freely pan around and see where OSRS *actually* brings you on your adventures, not just the very limited area offered by the vanilla map.<br>
 
 ## <u>What it does</u>
 
